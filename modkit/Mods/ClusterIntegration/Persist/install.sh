@@ -19,6 +19,26 @@
 # everyone. One line per decision goes to /tmp/cluster_daemon_start.log.
 DAEMON_PID=/tmp/cluster_daemon.pid
 DAEMON_LOG=/tmp/cluster_daemon_start.log
+
+# On cold boot AAWireless connects before Audi's native nav (navStartup)
+# initializes (~15-20 s). If the cluster daemon starts and the hook tries to
+# post AA video to displayable 33 before navStartup has set up the display,
+# the first AA session's cockpit is broken until the user disconnects and
+# reconnects the adapter. Wait up to 30 s for navStartup here so the daemon
+# only starts once the cockpit is ready. On warm restarts navStartup is
+# already running and this returns immediately.
+PATH="$PATH:/mnt/app/armle/usr/bin:/mnt/app/armle/bin:/usr/bin:/bin"
+i=0
+while [ $i -lt 30 ]; do
+    if pidin ar 2>/dev/null | grep 'navStartup' >/dev/null 2>&1; then
+        print "persist: navStartup detected after ${i}s" >> "$DAEMON_LOG" 2>/dev/null
+        break
+    fi
+    sleep 1
+    i=$((i + 1))
+done
+[ $i -ge 30 ] && print "persist: navStartup wait timed out at 30s, proceeding anyway" >> "$DAEMON_LOG" 2>/dev/null
+
 if [[ -x "/eso/bin/apps/cluster/cluster" ]]; then
         if { read p < "$DAEMON_PID" && [[ -n "$p" && -d "/proc/$p" ]]; } 2>/dev/null; then
                 print "persist: daemon already running, pid $p" >> "$DAEMON_LOG" 2>/dev/null
@@ -28,5 +48,21 @@ if [[ -x "/eso/bin/apps/cluster/cluster" ]]; then
                 print $p > "$DAEMON_PID" 2>/dev/null
                 print "persist: started daemon pid $p (pid file written: $?)" >> "$DAEMON_LOG" 2>/dev/null
         fi
+fi
+
+
+# kill_gal_watcher: on this Audi (P2711) the Java KombiMapGuard never fires,
+# so Audi's native cockpit map stays visible on cold boot even with AA
+# connected. The watcher runs the user's manual airplane-mode trick from
+# shell: wait for gal.real to come up, give Audi maps 30 s to load, then
+# slay gal.real so the phone AA session reconnects clean and the mod can
+# hide the cockpit map on first try. Runs as root — no RuntimePermission
+# issue. MOD_PATH isn't set in Persist context, so resolve relative to $0.
+WATCHER="${0%/*}/kill_gal_watcher.sh"
+if [ -r "$WATCHER" ]; then
+    ( /bin/ksh "$WATCHER" >/dev/null 2>&1 ) &
+    print "persist: kill_gal_watcher started pid $! from $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
+else
+    print "persist: kill_gal_watcher not found at $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
 fi
 
