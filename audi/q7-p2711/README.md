@@ -2,7 +2,9 @@
 
 Google Maps from Android Auto, full width in the Virtual Cockpit. It shows the 3D driving view with the turn card, and the car marker stays above Audi's bottom info bar. It works over a cable and through wireless Android Auto adapters.
 
-**Download:** `ClusterIntegration_v0034_q7_p2711_audi.zip` from the [latest release](https://github.com/bhushangahire/mh2p-cluster/releases/latest), or from [`builds/`](../../builds/ClusterIntegration_v0034_q7_p2711_audi.zip) in this repo (open it and click the download button).
+**Download:** `ClusterIntegration_v0034_q7_p2711_audi.zip` from the [v1.2 release](https://github.com/bhushangahire/mh2p-cluster/releases/tag/q7-p2711-v1.2) (or the [latest release](https://github.com/bhushangahire/mh2p-cluster/releases/latest)), or from [`builds/`](../../builds/ClusterIntegration_v0034_q7_p2711_audi.zip) in this repo (open it and click the download button).
+
+> **v1.2** adds a shell watcher that auto-slays `gal.real` ~30 s after Android Auto connects on cold boot, so Google Maps appears in the Virtual Cockpit without the manual airplane-mode trick.
 
 > Don't use GitHub's green **Code → Download ZIP** button. That downloads the project's source code, which the car can't install.
 
