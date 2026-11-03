@@ -55,19 +55,17 @@ if [[ -x "/eso/bin/apps/cluster/cluster" ]]; then
 fi
 
 
-# kill_gal_watcher: opt-in shell loop that slays gal.real after Audi maps
-# load, forcing the phone AA session to reconnect so the mod can hide the
-# native cockpit map on first try. Originally the only way the Q7 showed
-# Google Maps on cold boot, before KombiMapGuard was folded with the
-# e-tron handback (ServiceTracker lookup). Off by default; drop a
-# Mods/ClusterIntegration/enable_shell_reconnect.txt marker to re-enable.
-if [ -r /mnt/app/eso/bin/apps/cluster/shell_reconnect ]; then
-    WATCHER="${0%/*}/kill_gal_watcher.sh"
-    if [ -r "$WATCHER" ]; then
-        ( /bin/ksh "$WATCHER" >/dev/null 2>&1 ) &
-        print "persist: kill_gal_watcher started pid $! from $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
-    else
-        print "persist: kill_gal_watcher marker set but script not found at $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
-    fi
+# kill_gal_watcher: on P2711 the Java KombiMapGuard still misses the first
+# cold-boot cycle even with the ServiceTracker fix, so run the airplane-
+# mode trick from shell: wait for gal.real to come up, give Audi maps
+# 30 s to load, slay gal.real so the phone AA session reconnects clean
+# and the mod can hide the cockpit map on first try. MOD_PATH isn't set
+# in Persist context, so resolve relative to $0.
+WATCHER="${0%/*}/kill_gal_watcher.sh"
+if [ -r "$WATCHER" ]; then
+    ( /bin/ksh "$WATCHER" >/dev/null 2>&1 ) &
+    print "persist: kill_gal_watcher started pid $! from $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
+else
+    print "persist: kill_gal_watcher not found at $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
 fi
 

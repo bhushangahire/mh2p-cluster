@@ -2,9 +2,9 @@
 
 Google Maps from Android Auto, full width in the Virtual Cockpit. It shows the 3D driving view with the turn card, and the car marker stays above Audi's bottom info bar. It works over a cable and through wireless Android Auto adapters.
 
-**Download:** `ClusterIntegration_v0034_q7_p2711_audi.zip` from the [v1.3 release](https://github.com/bhushangahire/mh2p-cluster/releases/tag/q7-p2711-v1.3) (or the [latest release](https://github.com/bhushangahire/mh2p-cluster/releases/latest)), or from [`builds/`](../../builds/ClusterIntegration_v0034_q7_p2711_audi.zip) in this repo (open it and click the download button).
+**Download:** `ClusterIntegration_v0034_q7_p2711_audi.zip` from the [v1.3.1 release](https://github.com/bhushangahire/mh2p-cluster/releases/tag/q7-p2711-v1.3.1) (or the [latest release](https://github.com/bhushangahire/mh2p-cluster/releases/latest)), or from [`builds/`](../../builds/ClusterIntegration_v0034_q7_p2711_audi.zip) in this repo (open it and click the download button).
 
-> **v1.3** merges upstream's folded `KombiMapGuard` (service-tracker-based lookup) so the Java mod now fires on P2711 without the shell-side airplane-mode trick. The shell watcher from v1.2 is still shipped but off by default; drop a `shell_reconnect` marker over SSH if you need to re-enable it.
+> **v1.3.1** rolls back two v1.3 regressions seen on P2711: the upstream `modkit/template/template.txt` map insets (179/180/195/160/160, 200 dpi) replaced the full-width layout, and the Java `KombiMapGuard` still missed the first cold-boot cycle. The shell watcher is back on by default and the cluster-template patching is skipped so `gal_cluster.so` ships as released.
 
 > Don't use GitHub's green **Code → Download ZIP** button. That downloads the project's source code, which the car can't install.
 
