@@ -32,13 +32,17 @@
 #   mode: letter (fit, black bars), fill (cover, crops top/bottom), stretch
 #   codecRes: 480, 720 or 1080 (the stream size asked from the phone)
 #   zoomX/zoomY > 1 enlarge (crop), panX/panY shift the visible part
-# e-tron (1920x722 cockpit): codecRes=1080 with mode="fill" and the 180 px
-# insets from gal_env.txt shows the centre band pixel for pixel across the
-# full width; see the README. letter (the default) pillarboxes 16:9 frames.
+# e-tron (1920x722 cockpit): codecRes=1080 with mode="fill" shows the centre
+# 722 rows (179-900) of the 1080-row frame pixel for pixel across the full
+# width, and the cluster entry built into gal_cluster.so (modkit/template/
+# template.txt) tells the phone to lay its UI out inside exactly that band
+# and clear of the Audi info bar, so keep panY=0 with it. (The earlier
+# panY=0.248 recipe only panned to where Google had put the car marker.)
+# letter (the default) pillarboxes 16:9 frames; see the README.
 #gal_h264.mode="fill"
 #gal_h264.codecRes=1080
+#gal_h264.panY=0
 #gal_h264.zoomX=1.0
 #gal_h264.zoomY=1.0
 #gal_h264.panX=0.0
-#gal_h264.panY=0.0
 # Same keys for the mirror (screen-capture) path: mirror.mode, mirror.zoomX ...

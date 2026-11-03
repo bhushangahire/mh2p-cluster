@@ -1,0 +1,13 @@
+# Byte patches for Update/cluster (v0034 beta2 candidate 90d0b76), applied by
+# build_sd_package.sh with modkit/patches/apply_patches.py. Format:
+#   <offset> <expected bytes> <new bytes>  # comment
+#
+# Decoder ring start (Bhushan Ahire, PR #11, run on a Q7 P2711 and, by
+# Treuce, on an A6 P2873). run_h264_mode() started reading the shared-memory
+# ring at the current write position, after the hook had already written the
+# session's SPS/PPS and first IDR, so the decoder waited for the next keyframe
+# and the cockpit stayed black until a reconnect. Source fix in src/cluster.c:
+# read_pos = 0; last_total = 0. In the binary that is the two loads
+#   ldr.w r11, [r9, #4]   (shm->write_pos)   -> mov.w r11, #0
+#   ldr.w r4,  [r9, #8]   (shm->total_bytes) -> mov.w r4,  #0
+0x66ec  d9f804b0d9f80840  4ff0000b4ff00004  # h264 child reads the ring from its start

@@ -1,0 +1,18 @@
+# Cluster display entry the Android Auto hook offers the phone, applied to
+# Update/gal_cluster.so by build_sd_package.sh (modkit/template/
+# cluster_template_tool.py). One key=value per line, frame pixels at
+# codecRes=1080 (1920x1080); '#' starts a comment. Keys not listed keep the
+# tool's defaults. Remove this file to ship the hook as released.
+#
+# These are the Q7 (P2711) values from PR #11, verified on the same 1920x722
+# cockpit, used on the e-tron with gal_h264.panY=0 (centred crop, frame rows
+# 179..900): the phone keeps its UI inside those rows and out of the Audi
+# info bar (inset_bottom) and the curved housing (inset_left/right).
+height_margin=358
+margin_top=179
+margin_bottom=180
+inset_bottom=195
+inset_left=160
+inset_right=160
+density=200
+real_density=200

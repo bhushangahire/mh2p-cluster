@@ -461,7 +461,7 @@ IDSIControllerStateListener {
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] Screen: MU -> Device", (Object)LOGCLASS);
                 AndroidAuto2Subsystem.this.keyEventController.clearOutstandingEvents();
-                if (IRequestor.DEVICE.isNot((Object)iRequestor)) {
+                if (IRequestor.DEVICE.isNot(iRequestor)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, l, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }
@@ -470,7 +470,7 @@ IDSIControllerStateListener {
 
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] Screen: Device -> MU", (Object)LOGCLASS);
-                if (!iRequestor.isOneOf((Object)IRequestor.DEVICE, (Object)IRequestor.DEVICE_WHILE_DISCONNECTING) && !AndroidAuto2Subsystem.this.stateHandler.getCurrentState().isAccessRestricted(Resource.SCREEN)) {
+                if (!iRequestor.isOneOf(IRequestor.DEVICE, IRequestor.DEVICE_WHILE_DISCONNECTING) && !AndroidAuto2Subsystem.this.stateHandler.getCurrentState().isAccessRestricted(Resource.SCREEN)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, l, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }
@@ -479,7 +479,7 @@ IDSIControllerStateListener {
 
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] audio media: device -> MU", (Object)LOGCLASS);
-                if (iRequestor.is((Object)IRequestor.MAINUNIT)) {
+                if (iRequestor.is(IRequestor.MAINUNIT)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, l, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }
@@ -488,10 +488,10 @@ IDSIControllerStateListener {
 
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] speech: device -> nobody", (Object)LOGCLASS);
-                if (iTMState.isAppFree(Application.SPEECH) && iTMState.isResourceOwnerDevice(Resource.AUDIO_MEDIA) && !iTMState.getStateForResource(Resource.AUDIO_MEDIA).is((Object)ResourceState.PAUSED_BY_MUTE)) {
+                if (iTMState.isAppFree(Application.SPEECH) && iTMState.isResourceOwnerDevice(Resource.AUDIO_MEDIA) && !iTMState.getStateForResource(Resource.AUDIO_MEDIA).is(ResourceState.PAUSED_BY_MUTE)) {
                     AndroidAuto2Subsystem.this.androidAuto2DSIManager.resume();
                 }
-                if (iRequestor.is((Object)IRequestor.MAINUNIT)) {
+                if (iRequestor.is(IRequestor.MAINUNIT)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, -1L, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }
@@ -500,7 +500,7 @@ IDSIControllerStateListener {
 
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] speech: nobody -> mainunit", (Object)LOGCLASS);
-                if (iRequestor.is((Object)IRequestor.MAINUNIT)) {
+                if (iRequestor.is(IRequestor.MAINUNIT)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, l, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }
@@ -509,7 +509,7 @@ IDSIControllerStateListener {
 
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] speech: mainunit -> nobody", (Object)LOGCLASS);
-                if (iRequestor.is((Object)IRequestor.MAINUNIT)) {
+                if (iRequestor.is(IRequestor.MAINUNIT)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, l, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }
@@ -518,7 +518,7 @@ IDSIControllerStateListener {
 
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] Navi: Device -> MU", (Object)LOGCLASS);
-                if (iRequestor.is((Object)IRequestor.MAINUNIT)) {
+                if (iRequestor.is(IRequestor.MAINUNIT)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, l, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }
@@ -527,7 +527,7 @@ IDSIControllerStateListener {
 
             public void execute(CommandList commandList, ITMState iTMState, IRequestor iRequestor, long l) {
                 AndroidAuto2Subsystem.this.logger.log(1000000, "[%1.changeState] Navi: Nobody -> MU", (Object)LOGCLASS);
-                if (iRequestor.is((Object)IRequestor.MAINUNIT)) {
+                if (iRequestor.is(IRequestor.MAINUNIT)) {
                     commandList.add((ICommand)new RequestModeChange(AndroidAuto2Subsystem.this.context, iTMState, l, AndroidAuto2Subsystem.this.stateHandler));
                 }
             }

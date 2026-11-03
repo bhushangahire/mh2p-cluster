@@ -23,6 +23,8 @@
 #     no_stub.txt         Audi: do not install the StorageMountHandler stand-in
 #     gal_env.txt         GAL_CLUSTER_*=value lines exported to the Android
 #                         Auto hook by the gal wrapper (insets, live logging)
+#     daemon_log.txt      start the cluster daemon with verbose=2
+#                         (cluster_daemon.log on USB or /tmp)
 #     uninstall.txt       ModKit convention: run uninstall.sh instead
 # - Copies JAR, cluster, gal_cluster.so, dio_cluster.so to their target dirs.
 # - On Audi also installs Update/audi/ClusterIntegration_StorageMountHandler_
@@ -752,6 +754,24 @@ if [[ -f "$GAL_ENV_SRC" ]]; then
 elif [[ -f "$GAL_ENV_DST" ]]; then
     bk="$BACKUP_DIR/gal_env.backup.$(ts)"
     cp -p "$GAL_ENV_DST" "$bk" && rm -f "$GAL_ENV_DST" && print "remove gal env:    $GAL_ENV_DST -> $bk" && note "remove $GAL_ENV_DST backup=$bk"
+fi
+
+# Daemon log. Mods/ClusterIntegration/daemon_log.txt on the card installs the
+# marker $CLUSTER_DIR/daemon_verbose; the Persist script and the gal wrapper
+# then start the cluster daemon with verbose=2 (cluster_daemon.log on the
+# first writable USB stick, else /tmp, capped at 1 MB). Without the file the
+# daemon runs quiet and an installed marker is removed.
+DAEMON_LOG_SRC="$MOD_ROOT/daemon_log.txt"
+DAEMON_LOG_DST="$CLUSTER_DIR/daemon_verbose"
+if [[ -f "$DAEMON_LOG_SRC" ]]; then
+    if [[ ! -f "$DAEMON_LOG_DST" ]]; then
+        : > "$DAEMON_LOG_DST" && note "add $DAEMON_LOG_DST"
+    fi
+    print "daemon log:        ON ($DAEMON_LOG_DST; cluster_daemon.log on USB or /tmp)"
+elif [[ -f "$DAEMON_LOG_DST" ]]; then
+    rm -f "$DAEMON_LOG_DST" && print "daemon log:        OFF (removed $DAEMON_LOG_DST)" && note "remove $DAEMON_LOG_DST"
+else
+    print "daemon log:        OFF (create Mods/ClusterIntegration/daemon_log.txt to turn it on)"
 fi
 
 swap_binary_for_wrapper gal

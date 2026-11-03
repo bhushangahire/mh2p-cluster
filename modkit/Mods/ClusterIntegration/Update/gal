@@ -71,7 +71,11 @@ if [ -x "$CLUSTER_BIN" ]; then
     if { read p < "$DAEMON_PID" && [ -n "$p" ] && [ -d "/proc/$p" ]; } 2>/dev/null; then
         echo "cluster daemon: already running (pid $p)" >> $GAL_PRELOAD_LOG
     else
-        "$CLUSTER_BIN" daemon >/dev/null 2>&1 &
+        # verbose=2 (cluster_daemon.log) only with the marker the installer
+        # sets from Mods/ClusterIntegration/daemon_log.txt
+        V=""
+        [ -f /mnt/app/eso/bin/apps/cluster/daemon_verbose ] && V="verbose=2"
+        "$CLUSTER_BIN" daemon $V >/dev/null 2>&1 &
         p=$!
         echo $p > "$DAEMON_PID" 2>/dev/null
         echo "cluster daemon: not running, started by the gal wrapper (pid $p, pid file written: $?)" >> $GAL_PRELOAD_LOG
