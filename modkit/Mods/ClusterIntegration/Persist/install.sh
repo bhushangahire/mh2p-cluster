@@ -65,3 +65,19 @@ if [ -r "$WATCHER" ]; then
     print "persist: kill_gal_watcher started pid $! from $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
 fi
 
+
+# Copy the RAM-only logs next to cluster.log every 30 s, so a tester's card
+# also carries the reconnect and daemon-start story. Does nothing unless
+# external logging has written a cluster.log to a card or stick.
+(
+    while :; do
+        sleep 30
+        for d in /fs/usb0_0 /fs/usb1_0 /fs/sda0 /fs/sdb0; do
+            [ -f "$d/cluster.log" ] || continue
+            mkdir -p "$d/mh2p_tmp_logs" 2>/dev/null
+            for f in kill_gal_watcher.log gal_preload.log cluster_daemon_start.log cluster_daemon.log; do
+                [ -f "/tmp/$f" ] && cp "/tmp/$f" "$d/mh2p_tmp_logs/$f" 2>/dev/null
+            done
+        done
+    done
+) >/dev/null 2>&1 &

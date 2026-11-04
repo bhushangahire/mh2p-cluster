@@ -4,15 +4,17 @@
 # codecRes=1080 (1920x1080); '#' starts a comment. Keys not listed keep the
 # tool's defaults. Remove this file to ship the hook as released.
 #
-# These are the Q7 (P2711) values from PR #11, verified on the same 1920x722
-# cockpit, used on the e-tron with gal_h264.panY=0 (centred crop, frame rows
-# 179..900): the phone keeps its UI inside those rows and out of the Audi
-# info bar (inset_bottom) and the curved housing (inset_left/right).
+# Q7 (P2711) daily-driver values (card 32, the same 54 bytes as its
+# gal_cluster.so), with gal_h264.panY=0 (centred crop, frame rows 179..900):
+# the phone keeps its UI inside those rows and out of the Audi info bar
+# (inset_bottom) and the curved housing. Google centres the car between the
+# left inset and its turn card, so left 450 puts it mid-cockpit; density 215
+# draws the map a little closer than PR #11's 200.
 height_margin=358
 margin_top=179
 margin_bottom=180
 inset_bottom=195
-inset_left=160
+inset_left=450
 inset_right=160
-density=200
-real_density=200
+density=215
+real_density=215

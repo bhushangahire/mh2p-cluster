@@ -1,12 +1,15 @@
 package de.audi.app.terminalmode.smartphone.androidauto2.nav;
 
 import de.audi.app.terminalmode.IContext;
+import de.audi.app.terminalmode.device.IDeviceManager;
+import de.audi.app.terminalmode.device.TMDevice;
 import org.dsi.ifc.map.DSIMapViewerControl;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceReference;
 import org.osgi.util.tracker.ServiceTracker;
 import org.osgi.util.tracker.ServiceTrackerCustomizer;
 
+import java.io.File;
 import java.io.FileOutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -35,15 +38,24 @@ import java.lang.reflect.Method;
  * services are found and SETTLE_MS has passed, write /tmp/kill_gal_now if the
  * video was rendering before that point, else /tmp/kill_gal_skip;
  * Persist/kill_gal_watcher.sh acts on the flag (slays gal.real, the phone
- * reconnects). Every call is reflective inside a catch-all. Java 1.4 source.
+ * reconnects). After the slay the HMI rediscovers the phone but skips its
+ * automatic activation (TMDeviceControl ReadyForConnect: "skipped
+ * readyForActivation"), leaving the "connect your phone" list; the guard then
+ * activates the device that was active before the kill, the same
+ * IDeviceManager.control(device).activateDevice() call the HMI's
+ * AutomaticDeviceActivator and the tap make. Every call is inside a
+ * catch-all. Java 1.4 source.
  */
 public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
 
-    public static final String BUILD = "kombi-guard q7-trigger 2026-11-03b";
+    public static final String BUILD = "kombi-guard q7-autoconnect 2026-11-04";
 
     private static final String MAP_CLUSTER_CLASS = "de.audi.tghu.navi.app.cluster.IMapClusterService";
     private static final String KILL_FLAG = "/tmp/kill_gal_now";
     private static final String SKIP_FLAG = "/tmp/kill_gal_skip";
+    private static final String CLUSTER_CTL = "/tmp/cluster_ctl";
+    private static final int CL_IDLE = 0;
+    private static final int CL_PREPARED = 1;
     private static final int CL_RENDERING = 2;
     private static final int KOMBI_INSTANCE = 3;
     private static final long POLL_MS = 1000L;
@@ -52,6 +64,11 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private static final long SETTLE_MS = 10000L;
     private static final long REAPPLY_MS = 10000L;
     private static final long SHOW_DELAY_MS = 1200L;
+    // Reconnect window after the kill flag, wait after the drop, retry spacing.
+    private static final long RECONNECT_WINDOW_MS = 150000L;
+    private static final long ACTIVATE_DELAY_MS = 5000L;
+    private static final long ACTIVATE_RETRY_MS = 10000L;
+    private static final int ACTIVATE_MAX = 4;
 
     private final IContext context;
     private final AndroidAutoClusterIntegration integration;
@@ -66,9 +83,15 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private boolean suspended = false;
     private long lastApply = 0L;
     private long showAt = 0L;
+    private boolean splashPending = false;
     private boolean renderedEarly = false;
     private long readyAt = 0L;
     private boolean decided = false;
+    private long reconnectUntil = 0L;
+    private TMDevice reconnectDevice;
+    private boolean sawDrop = false;
+    private long nextActivate = 0L;
+    private int activations = 0;
 
     private KombiMapGuard(IContext context, AndroidAutoClusterIntegration integration) {
         this.context = context;
@@ -140,6 +163,14 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             showAt = 0L;
             showNative();
         }
+        if (splashPending) {
+            int state = stateField.getInt(integration);
+            if (rendering || state == CL_PREPARED) {
+                splashPending = false;
+            } else if (state == CL_IDLE && releaseStopSplash()) {
+                splashPending = false;
+            }
+        }
         if (readyAt == 0L && kombiViewer != null && mapClusterService != null) {
             readyAt = now;
             log("navigation services ready, deciding in " + (SETTLE_MS / 1000) + " s");
@@ -151,11 +182,70 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             decided = true;
             if (renderedEarly) {
                 log("AA started before the navigation was ready, asking for one reconnect");
+                armReconnect(now);
                 touch(KILL_FLAG);
             } else {
                 log("navigation was ready before AA, no reconnect needed");
                 touch(SKIP_FLAG);
             }
+        }
+        if (reconnectUntil != 0L) {
+            reconnectTick(now);
+        }
+    }
+
+    /** Remembers the active AA device before the watcher slays gal.real. */
+    private void armReconnect(long now) {
+        try {
+            TMDevice d = context.getDeviceManager().getActiveDevice();
+            reconnectDevice = (d != null && d.isValid()) ? d : null;
+            reconnectUntil = now + RECONNECT_WINDOW_MS;
+            sawDrop = false;
+            activations = 0;
+            log("auto-connect armed for " + reconnectDevice);
+        } catch (Throwable t) {
+            log("auto-connect not armed: " + t);
+        }
+    }
+
+    /**
+     * Waits for the active device to drop (gal.real slain), then activates it
+     * again until it is active, ACTIVATE_MAX tries or the window ends. A call
+     * in any state but ReadyForConnect is ignored by the HMI's state machine.
+     */
+    private void reconnectTick(long now) {
+        try {
+            IDeviceManager dm = context.getDeviceManager();
+            TMDevice active = dm.getActiveDevice();
+            boolean activeValid = active != null && active.isValid();
+            if (now > reconnectUntil) {
+                log("auto-connect window over (dropped=" + sawDrop + ", tries=" + activations + ", active=" + active + ")");
+                reconnectUntil = 0L;
+            } else if (!sawDrop) {
+                if (!activeValid) {
+                    sawDrop = true;
+                    nextActivate = now + ACTIVATE_DELAY_MS;
+                    log("AA device dropped, activating it in " + (ACTIVATE_DELAY_MS / 1000) + " s unless the HMI does");
+                }
+            } else if (activeValid) {
+                log("AA device active again after " + activations + " auto-connect tries: " + active);
+                reconnectUntil = 0L;
+            } else if (now >= nextActivate && activations < ACTIVATE_MAX) {
+                nextActivate = now + ACTIVATE_RETRY_MS;
+                TMDevice d = reconnectDevice != null ? reconnectDevice : dm.getLastActiveDevice();
+                if (d == null || !d.isValid()) {
+                    log("auto-connect: no device to activate (last=" + d + ")");
+                } else if (!dm.isDeviceControlAvailable(d.getUniqueID())) {
+                    log("auto-connect: " + d + " not discovered yet");
+                } else {
+                    activations++;
+                    log("auto-connect: activating " + d + " (try " + activations + ")");
+                    dm.control(d).activateDevice();
+                }
+            }
+        } catch (Throwable t) {
+            log("auto-connect error: " + t);
+            reconnectUntil = 0L;
         }
     }
 
@@ -197,6 +287,30 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
         suspended = false;
         callMapCluster("switchKombiMapToHiddenContext");
         callMapCluster("switchKombiMapToAShownContext");
+        splashPending = true;
+    }
+
+    /**
+     * On "stop" the cluster daemon posts a canim splash to displayable 33 with
+     * no time limit and only removes it on the next "resume", so after an AA
+     * unplug the native map stays covered (black cockpit until an MMI restart,
+     * A6 C8 report 2026-11-04). "resume" with no h264 child kills just the
+     * splash. Only after a real session end (IDLE), not a pause, and only when
+     * the daemon has consumed the previous command (it truncates the file).
+     */
+    private boolean releaseStopSplash() {
+        try {
+            if (new File(CLUSTER_CTL).length() != 0) {
+                return false;
+            }
+            FileOutputStream out = new FileOutputStream(CLUSTER_CTL);
+            out.write("resume\n".getBytes());
+            out.close();
+            log("sent 'resume' to " + CLUSTER_CTL + " to drop the stop splash");
+        } catch (Throwable t) {
+            log("could not release stop splash: " + t);
+        }
+        return true;
     }
 
     private void callMapCluster(String method) {

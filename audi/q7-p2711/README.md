@@ -4,6 +4,8 @@ Google Maps from Android Auto, full width in the Virtual Cockpit. It shows the 3
 
 **Download:** `ClusterIntegration_v0034_q7_p2711_audi.zip` from the [v1.4 release](https://github.com/bhushangahire/mh2p-cluster/releases/tag/q7-p2711-v1.4) (or the [latest release](https://github.com/bhushangahire/mh2p-cluster/releases/latest)), or from [`builds/`](../../builds/ClusterIntegration_v0034_q7_p2711_audi.zip) in this repo (open it and click the download button).
 
+> **v1.4.1** (pre-release, being tested): after the automatic restart the guard connects Android Auto itself, the same call the tap on the device list makes, so no tap should be needed. Also: Q7 margins left 450 / density 215 (car marker mid-cockpit), Audi's map comes back after unplugging the phone instead of a black cockpit, and the restart logs are copied to `mh2p_tmp_logs/` on the USB stick next to `cluster.log`. [v1.4.1 release](https://github.com/bhushangahire/mh2p-cluster/releases/tag/q7-p2711-v1.4.1).
+>
 > **v1.4** reconnects Android Auto once on a cold boot so the cockpit map comes up without the airplane-mode trick. `KombiMapGuard` finds the navigation services (OSGi ServiceTracker) and, if AA connected before them, asks `Persist/kill_gal_watcher.sh` to restart `gal.real` once. Known issue: after that restart the MMI may show its device list; tap your Android Auto device once.
 >
 > Keep `Mods/ClusterIntegration/config_overrides.txt` on the card (shipped since v1.4). Without it the cockpit falls back to `mode=letter` and the map draws boxed between the gauges.
