@@ -2,9 +2,11 @@
 
 Google Maps from Android Auto, full width in the Virtual Cockpit. It shows the 3D driving view with the turn card, and the car marker stays above Audi's bottom info bar. It works over a cable and through wireless Android Auto adapters.
 
-**Download:** `ClusterIntegration_v0034_q7_p2711_audi.zip` from the [v1.3.2 release](https://github.com/bhushangahire/mh2p-cluster/releases/tag/q7-p2711-v1.3.2) (or the [latest release](https://github.com/bhushangahire/mh2p-cluster/releases/latest)), or from [`builds/`](../../builds/ClusterIntegration_v0034_q7_p2711_audi.zip) in this repo (open it and click the download button).
+**Download:** `ClusterIntegration_v0034_q7_p2711_audi.zip` from the [v1.4 release](https://github.com/bhushangahire/mh2p-cluster/releases/tag/q7-p2711-v1.4) (or the [latest release](https://github.com/bhushangahire/mh2p-cluster/releases/latest)), or from [`builds/`](../../builds/ClusterIntegration_v0034_q7_p2711_audi.zip) in this repo (open it and click the download button).
 
-> **v1.3.2** also skips upstream's splash patch and h264 ring-start byte patch on the `cluster` daemon — one of them narrowed the Google Maps window on P2711 (black bars on the left/right). The daemon now ships identical to v1.2 (sha `74ad3363…`); `gal_cluster.so` and the Java jar still carry the upstream merge.
+> **v1.4** reconnects Android Auto once on a cold boot so the cockpit map comes up without the airplane-mode trick. `KombiMapGuard` finds the navigation services (OSGi ServiceTracker) and, if AA connected before them, asks `Persist/kill_gal_watcher.sh` to restart `gal.real` once. Known issue: after that restart the MMI may show its device list; tap your Android Auto device once.
+>
+> Keep `Mods/ClusterIntegration/config_overrides.txt` on the card (shipped since v1.4). Without it the cockpit falls back to `mode=letter` and the map draws boxed between the gauges.
 
 > Don't use GitHub's green **Code → Download ZIP** button. That downloads the project's source code, which the car can't install.
 

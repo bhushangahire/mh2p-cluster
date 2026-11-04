@@ -55,17 +55,13 @@ if [[ -x "/eso/bin/apps/cluster/cluster" ]]; then
 fi
 
 
-# kill_gal_watcher: on P2711 the Java KombiMapGuard still misses the first
-# cold-boot cycle even with the ServiceTracker fix, so run the airplane-
-# mode trick from shell: wait for gal.real to come up, give Audi maps
-# 30 s to load, slay gal.real so the phone AA session reconnects clean
-# and the mod can hide the cockpit map on first try. MOD_PATH isn't set
-# in Persist context, so resolve relative to $0.
+# kill_gal_watcher: on a cold boot AA connects before Audi's navigation is
+# up and its video does not show until AA reconnects. KombiMapGuard
+# decides (/tmp/kill_gal_now or /tmp/kill_gal_skip); the watcher slays
+# gal.real once on kill_gal_now, with a timer fallback.
 WATCHER="${0%/*}/kill_gal_watcher.sh"
 if [ -r "$WATCHER" ]; then
     ( /bin/ksh "$WATCHER" >/dev/null 2>&1 ) &
     print "persist: kill_gal_watcher started pid $! from $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
-else
-    print "persist: kill_gal_watcher not found at $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
 fi
 

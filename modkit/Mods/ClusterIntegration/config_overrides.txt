@@ -1,0 +1,4 @@
+gal_h264.codecRes=1080
+gal_h264.mode="fill"
+gal_h264.panY=0.0
+enableExternalLogging=true

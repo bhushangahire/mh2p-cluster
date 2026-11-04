@@ -7,57 +7,49 @@ import org.osgi.framework.ServiceReference;
 import org.osgi.util.tracker.ServiceTracker;
 import org.osgi.util.tracker.ServiceTrackerCustomizer;
 
+import java.io.FileOutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Hides the native Audi navigation map in the virtual cockpit while the
- * Android Auto cluster video is rendering, and shows it again afterwards.
+ * Hides the native Audi map in the virtual cockpit while the Android Auto
+ * cluster video renders, shows it again afterwards, and decides once per HMI
+ * start whether AA needs one reconnect.
  *
- * Why: on an Audi Q7 (MH2p P2711, AU_G35) the cockpit map context 25 holds
- * displayables {41, 33}. The cluster daemon posts the AA video into 33, but
- * the native navigation's cockpit map viewer (DSIMapViewerControl instance 3)
- * keeps drawing into 33 as well and stays on top. On an e-tron (P2873) the
- * cockpit went black after Android Auto ended because nothing asked the Audi
- * map back. The shipped AndroidAutoClusterIntegration has
- * suspendNativeNavCluster() but never calls it, and its one-time service
- * lookups run too early at boot.
+ * Why (Audi Q7, MH2p P2711): the native cockpit map viewer (DSIMapViewerControl
+ * instance 3) draws into displayable 33 on top of the AA video, so it has to be
+ * suspended and hidden while AA renders. On a cold boot AA connects before the
+ * navigation is up and the video still does not show; one AA reconnect after
+ * the navigation is ready (the airplane-mode trick) fixes it. The show path
+ * must not call IMapClusterService.notifyViewSizeChanged(true): the HMI then
+ * re-measures the cockpit into the small map layout and the AA video stays
+ * boxed between the gauges for the rest of the drive (on-car logs, 2026-11-03).
  *
  * How: a daemon thread polls AndroidAutoClusterIntegration.clusterState
- * (2 = RENDERING) once a second. The two navigation services are found two
- * ways: IMapClusterService through an OSGi ServiceTracker on the class NAME
- * (what the stock navigation's MapClusterServiceProxy does, so it is found
- * whenever the navigation bundle registers it) and both through the terminal
- * mode service manager, retried until found. On RENDERING it suspends the
- * kombi map viewer, calls viewSetVisible(false) and
- * IMapClusterService.switchKombiMapToHiddenContext() (the mod's own
- * suspendNativeNavCluster() sequence); when the video stops it runs the mod's
- * wakeNativeNavCluster() sequence 1.2 s later, once the mod's video window
- * is gone (the stock "shown" path, startActivity + enterMapScreen, is a
- * no-op while the HMI believes the map is already shown, hence hide first),
- * followed by notifyViewSizeChanged(true). It never switches display
- * contexts (context 25 is what keeps displayable 33 in the cockpit). Every
- * call goes through reflection inside a catch-all: a failure is logged and
- * Android Auto keeps running. At the first RENDERING it logs the registered
- * OSGi services whose names look map/cluster related, so a failed lookup on
- * a new car leaves evidence (KOMBI_MAP: service: lines in cluster.log).
- *
- * Based on KombiMapGuard by Bhushan Ahire (PR #11, Q7 P2711) with the
- * ServiceTracker, delayed show and service inventory from KombiMapHandback
- * (e-tron P2873). Java 1.4 source level (the HMI JVM loads class-file
- * version 48).
+ * (2 = RENDERING) once a second. IMapClusterService is found by an OSGi
+ * ServiceTracker on the class name plus service-manager retries,
+ * DSIMapViewerControl instance 3 by service-manager retries. On RENDERING:
+ * suspend the viewer, viewSetVisible(false), switchKombiMapToHiddenContext(),
+ * re-applied every REAPPLY_MS. When the video stops, SHOW_DELAY_MS later: wake
+ * the viewer, viewSetVisible(true), hidden then shown context. Once both
+ * services are found and SETTLE_MS has passed, write /tmp/kill_gal_now if the
+ * video was rendering before that point, else /tmp/kill_gal_skip;
+ * Persist/kill_gal_watcher.sh acts on the flag (slays gal.real, the phone
+ * reconnects). Every call is reflective inside a catch-all. Java 1.4 source.
  */
 public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
 
-    public static final String BUILD = "kombi-guard 2026-10-18a";
+    public static final String BUILD = "kombi-guard q7-trigger 2026-11-03b";
 
     private static final String MAP_CLUSTER_CLASS = "de.audi.tghu.navi.app.cluster.IMapClusterService";
+    private static final String KILL_FLAG = "/tmp/kill_gal_now";
+    private static final String SKIP_FLAG = "/tmp/kill_gal_skip";
     private static final int CL_RENDERING = 2;
     private static final int KOMBI_INSTANCE = 3;
     private static final long POLL_MS = 1000L;
     private static final long LOOKUP_RETRY_MS = 5000L;
-    // Fixed re-apply interval; make it configurable if the native
-    // map ever flickers back between re-applies.
+    // Time after both services appear for the cockpit map to finish loading.
+    private static final long SETTLE_MS = 10000L;
     private static final long REAPPLY_MS = 10000L;
     private static final long SHOW_DELAY_MS = 1200L;
 
@@ -68,13 +60,15 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private ServiceTracker tracker;
     private DSIMapViewerControl kombiViewer;
     private Object mapClusterService;
+    private long lastLookup = 0L;
+    private boolean codingLogged = false;
     private boolean hidden = false;
     private boolean suspended = false;
-    private long lastLookup = 0L;
     private long lastApply = 0L;
     private long showAt = 0L;
-    private boolean codingLogged = false;
-    private boolean servicesDumped = false;
+    private boolean renderedEarly = false;
+    private long readyAt = 0L;
+    private boolean decided = false;
 
     private KombiMapGuard(IContext context, AndroidAutoClusterIntegration integration) {
         this.context = context;
@@ -133,10 +127,6 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
                 showAt = 0L;
                 log("AA video rendering, hiding native cockpit map"
                         + " (viewer=" + (kombiViewer != null) + " mapCluster=" + (mapClusterService != null) + ")");
-                if (!servicesDumped) {
-                    servicesDumped = true;
-                    dumpServices();
-                }
             }
             hideNative(!hidden || !suspended);
             hidden = true;
@@ -150,13 +140,26 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             showAt = 0L;
             showNative();
         }
+        if (readyAt == 0L && kombiViewer != null && mapClusterService != null) {
+            readyAt = now;
+            log("navigation services ready, deciding in " + (SETTLE_MS / 1000) + " s");
+        }
+        if (rendering && (readyAt == 0L || now - readyAt < SETTLE_MS)) {
+            renderedEarly = true;
+        }
+        if (!decided && readyAt != 0L && now - readyAt >= SETTLE_MS) {
+            decided = true;
+            if (renderedEarly) {
+                log("AA started before the navigation was ready, asking for one reconnect");
+                touch(KILL_FLAG);
+            } else {
+                log("navigation was ready before AA, no reconnect needed");
+                touch(SKIP_FLAG);
+            }
+        }
     }
 
-    /**
-     * Same calls, same order as the mod's own (never called)
-     * suspendNativeNavCluster(). The viewer is suspended once per session;
-     * visibility and context are re-applied every REAPPLY_MS.
-     */
+    /** Viewer suspended once per session; visibility and context re-applied. */
     private void hideNative(boolean suspend) {
         if (kombiViewer != null) {
             if (suspend) {
@@ -177,10 +180,7 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
         callMapCluster("switchKombiMapToHiddenContext");
     }
 
-    /**
-     * Same calls, same order as the mod's own wakeNativeNavCluster(), then
-     * notifyViewSizeChanged(true) so the HMI re-measures the cockpit view.
-     */
+    /** No notifyViewSizeChanged here: it shrinks the cockpit map layout. */
     private void showNative() {
         if (kombiViewer != null) {
             try {
@@ -195,42 +195,29 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             }
         }
         suspended = false;
-        if (mapClusterService == null) {
-            log("IMapClusterService NOT available, cannot ask the Audi map back");
-            dumpServices();
-            return;
-        }
         callMapCluster("switchKombiMapToHiddenContext");
         callMapCluster("switchKombiMapToAShownContext");
-        callMapClusterBoolean("notifyViewSizeChanged", true);
     }
 
     private void callMapCluster(String method) {
         Object s = mapClusterService;
         if (s == null) {
-            log(method + " skipped - IMapClusterService not available");
             return;
         }
         try {
             Method m = s.getClass().getMethod(method, new Class[0]);
             m.invoke(s, new Object[0]);
-            log("IMapClusterService." + method + "() invoked");
         } catch (Throwable t) {
             log(method + " failed: " + t);
         }
     }
 
-    private void callMapClusterBoolean(String method, boolean arg) {
-        Object s = mapClusterService;
-        if (s == null) {
-            return;
-        }
+    private void touch(String path) {
         try {
-            Method m = s.getClass().getMethod(method, new Class[] { Boolean.TYPE });
-            m.invoke(s, new Object[] { arg ? Boolean.TRUE : Boolean.FALSE });
-            log("IMapClusterService." + method + "(" + arg + ") invoked");
+            new FileOutputStream(path).close();
+            log("wrote " + path);
         } catch (Throwable t) {
-            log(method + " failed: " + t);
+            log("could not write " + path + ": " + t);
         }
     }
 
@@ -317,52 +304,6 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             } catch (Throwable t) {
                 log("IMapClusterService lookup failed: " + t);
             }
-        }
-    }
-
-    /**
-     * Lists the registered OSGi services whose class names look cluster/map
-     * related, with DEVICE_INSTANCE / DEVICE_NAME where set, so a failed
-     * lookup leaves evidence of what this HMI offers.
-     */
-    private void dumpServices() {
-        if (bundleContext == null) {
-            return;
-        }
-        try {
-            ServiceReference[] refs = bundleContext.getServiceReferences(null, null);
-            int total = (refs == null) ? 0 : refs.length;
-            int listed = 0;
-            StringBuffer sb = new StringBuffer();
-            for (int i = 0; refs != null && i < refs.length && listed < 120; i++) {
-                Object oc = refs[i].getProperty("objectClass");
-                if (!(oc instanceof String[])) {
-                    continue;
-                }
-                String[] names = (String[]) oc;
-                for (int n = 0; n < names.length; n++) {
-                    String name = names[n];
-                    if (name.indexOf("Map") >= 0 || name.indexOf("Kombi") >= 0 || name.indexOf("Cluster") >= 0
-                            || name.indexOf("Combi") >= 0 || name.indexOf("Zoom") >= 0 || name.indexOf("navi") >= 0) {
-                        sb.setLength(0);
-                        sb.append("service: ").append(name);
-                        Object inst = refs[i].getProperty("DEVICE_INSTANCE");
-                        Object dev = refs[i].getProperty("DEVICE_NAME");
-                        if (inst != null) {
-                            sb.append(" DEVICE_INSTANCE=").append(inst);
-                        }
-                        if (dev != null) {
-                            sb.append(" DEVICE_NAME=").append(dev);
-                        }
-                        log(sb.toString());
-                        listed++;
-                        break;
-                    }
-                }
-            }
-            log("service dump done: " + listed + " of " + total + " registered services listed");
-        } catch (Throwable t) {
-            log("service dump failed: " + t);
         }
     }
 
