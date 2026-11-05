@@ -75,7 +75,7 @@ fi
         for d in /fs/usb0_0 /fs/usb1_0 /fs/sda0 /fs/sdb0; do
             [ -f "$d/cluster.log" ] || continue
             mkdir -p "$d/mh2p_tmp_logs" 2>/dev/null
-            for f in kill_gal_watcher.log gal_preload.log cluster_daemon_start.log cluster_daemon.log; do
+            for f in kill_gal_watcher.log gal_preload.log gal_cluster.log cluster_daemon_start.log cluster_daemon.log; do
                 [ -f "/tmp/$f" ] && cp "/tmp/$f" "$d/mh2p_tmp_logs/$f" 2>/dev/null
             done
         done

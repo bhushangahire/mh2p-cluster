@@ -1,7 +1,6 @@
 package de.audi.app.terminalmode.smartphone.androidauto2.nav;
 
 import de.audi.app.terminalmode.IContext;
-import de.audi.app.terminalmode.device.IDeviceManager;
 import de.audi.app.terminalmode.device.TMDevice;
 import org.dsi.ifc.map.DSIMapViewerControl;
 import org.osgi.framework.BundleContext;
@@ -21,12 +20,12 @@ import java.lang.reflect.Method;
  *
  * Why (Audi Q7, MH2p P2711): the native cockpit map viewer (DSIMapViewerControl
  * instance 3) draws into displayable 33 on top of the AA video, so it has to be
- * suspended and hidden while AA renders. On a cold boot AA connects before the
- * navigation is up and the video still does not show; one AA reconnect after
- * the navigation is ready (the airplane-mode trick) fixes it. The show path
- * must not call IMapClusterService.notifyViewSizeChanged(true): the HMI then
- * re-measures the cockpit into the small map layout and the AA video stays
- * boxed between the gauges for the rest of the drive (on-car logs, 2026-11-03).
+ * suspended and hidden while AA renders. On a cold boot AA connecting before
+ * the navigation is up leaves the cockpit video black until AA reconnects
+ * (the phone's video keeps arriving, hook rate log 2026-11-04). The guard
+ * writes /tmp/aa_cockpit_ready when the navigation services are up and the gal
+ * wrapper holds the first AA start until then, so AA connects once, late.
+ * The show path calls notifyViewSizeChanged(true) like the stock hand-back.
  *
  * How: a daemon thread polls AndroidAutoClusterIntegration.clusterState
  * (2 = RENDERING) once a second. IMapClusterService is found by an OSGi
@@ -37,38 +36,35 @@ import java.lang.reflect.Method;
  * the viewer, viewSetVisible(true), hidden then shown context. Once both
  * services are found and SETTLE_MS has passed, write /tmp/kill_gal_now if the
  * video was rendering before that point, else /tmp/kill_gal_skip;
- * Persist/kill_gal_watcher.sh acts on the flag (slays gal.real, the phone
- * reconnects). After the slay the HMI rediscovers the phone but skips its
- * automatic activation (TMDeviceControl ReadyForConnect: "skipped
- * readyForActivation"), leaving the "connect your phone" list; the guard then
- * activates the device that was active before the kill, the same
- * IDeviceManager.control(device).activateDevice() call the HMI's
- * AutomaticDeviceActivator and the tap make. Every call is inside a
+ * Persist/kill_gal_watcher.sh acts on the flag (slays gal.real once, the
+ * fallback when the wrapper's wait timed out). Every call is inside a
  * catch-all. Java 1.4 source.
  */
 public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
 
-    public static final String BUILD = "kombi-guard q7-autoconnect 2026-11-04";
+    public static final String BUILD = "kombi-guard q7-holdgal 2026-11-04d";
 
     private static final String MAP_CLUSTER_CLASS = "de.audi.tghu.navi.app.cluster.IMapClusterService";
     private static final String KILL_FLAG = "/tmp/kill_gal_now";
     private static final String SKIP_FLAG = "/tmp/kill_gal_skip";
     private static final String CLUSTER_CTL = "/tmp/cluster_ctl";
+    // Read by the gal wrapper: it holds the first AA start until this exists.
+    private static final String READY_FLAG = "/tmp/aa_cockpit_ready";
     private static final int CL_IDLE = 0;
     private static final int CL_PREPARED = 1;
     private static final int CL_RENDERING = 2;
+    private static final int CL_PAUSED = 3;
     private static final int KOMBI_INSTANCE = 3;
     private static final long POLL_MS = 1000L;
     private static final long LOOKUP_RETRY_MS = 5000L;
     // Time after both services appear for the cockpit map to finish loading.
     private static final long SETTLE_MS = 10000L;
+    // Time after both services appear before the gal wrapper may start AA.
+    private static final long RELEASE_MS = 5000L;
     private static final long REAPPLY_MS = 10000L;
     private static final long SHOW_DELAY_MS = 1200L;
-    // Reconnect window after the kill flag, wait after the drop, retry spacing.
-    private static final long RECONNECT_WINDOW_MS = 150000L;
-    private static final long ACTIVATE_DELAY_MS = 5000L;
-    private static final long ACTIVATE_RETRY_MS = 10000L;
-    private static final int ACTIVATE_MAX = 4;
+    // After a released pause: prepare, then resume this much later.
+    private static final long RESUME_AFTER_MS = 2500L;
 
     private final IContext context;
     private final AndroidAutoClusterIntegration integration;
@@ -85,13 +81,13 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private long showAt = 0L;
     private boolean splashPending = false;
     private boolean renderedEarly = false;
+    private boolean released = false;
     private long readyAt = 0L;
     private boolean decided = false;
-    private long reconnectUntil = 0L;
-    private TMDevice reconnectDevice;
-    private boolean sawDrop = false;
-    private long nextActivate = 0L;
-    private int activations = 0;
+    private int rebindStep = 0;
+    private long rebindAt = 0L;
+    private boolean stopSent = false;
+    private boolean pausedReleased = false;
 
     private KombiMapGuard(IContext context, AndroidAutoClusterIntegration integration) {
         this.context = context;
@@ -167,85 +163,94 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             int state = stateField.getInt(integration);
             if (rendering || state == CL_PREPARED) {
                 splashPending = false;
-            } else if (state == CL_IDLE && releaseStopSplash()) {
-                splashPending = false;
+                stopSent = false;
+            } else if (state == CL_IDLE) {
+                if (releaseStopSplash()) {
+                    splashPending = false;
+                    stopSent = false;
+                }
+            } else if (state == CL_PAUSED && !deviceActive()) {
+                // Adapter pulled: AA only paused the video and the paused
+                // h264 child keeps its window over the native map. Stop it,
+                // then drop the stop splash; a later resume re-prepares.
+                if (!stopSent) {
+                    if (new File(CLUSTER_CTL).length() == 0 && mirror("stop")) {
+                        stopSent = true;
+                        pausedReleased = true;
+                        log("AA paused with no active device, releasing the cockpit");
+                    }
+                } else if (releaseStopSplash()) {
+                    splashPending = false;
+                    stopSent = false;
+                }
             }
+        }
+        if (rendering && pausedReleased && rebindStep == 0) {
+            pausedReleased = false;
+            log("AA video back after a released pause, re-preparing the cockpit window");
+            if (mirror("prepare")) {
+                rebindStep = 3;
+                rebindAt = now + RESUME_AFTER_MS;
+            }
+        }
+        if (rebindStep == 3 && now >= rebindAt && new File(CLUSTER_CTL).length() == 0) {
+            mirror("resume");
+            rebindStep = 0;
         }
         if (readyAt == 0L && kombiViewer != null && mapClusterService != null) {
             readyAt = now;
-            log("navigation services ready, deciding in " + (SETTLE_MS / 1000) + " s");
+            log("navigation services ready, releasing AA in " + (RELEASE_MS / 1000) + " s");
         }
-        if (rendering && (readyAt == 0L || now - readyAt < SETTLE_MS)) {
+        if (!released && readyAt != 0L && now - readyAt >= RELEASE_MS) {
+            released = true;
+            touch(READY_FLAG);
+        }
+        if (rendering && !released) {
+            // only when the wrapper's wait timed out and AA came up anyway
             renderedEarly = true;
         }
         if (!decided && readyAt != 0L && now - readyAt >= SETTLE_MS) {
             decided = true;
             if (renderedEarly) {
                 log("AA started before the navigation was ready, asking for one reconnect");
-                armReconnect(now);
                 touch(KILL_FLAG);
             } else {
                 log("navigation was ready before AA, no reconnect needed");
                 touch(SKIP_FLAG);
             }
         }
-        if (reconnectUntil != 0L) {
-            reconnectTick(now);
-        }
-    }
-
-    /** Remembers the active AA device before the watcher slays gal.real. */
-    private void armReconnect(long now) {
-        try {
-            TMDevice d = context.getDeviceManager().getActiveDevice();
-            reconnectDevice = (d != null && d.isValid()) ? d : null;
-            reconnectUntil = now + RECONNECT_WINDOW_MS;
-            sawDrop = false;
-            activations = 0;
-            log("auto-connect armed for " + reconnectDevice);
-        } catch (Throwable t) {
-            log("auto-connect not armed: " + t);
-        }
     }
 
     /**
-     * Waits for the active device to drop (gal.real slain), then activates it
-     * again until it is active, ACTIVATE_MAX tries or the window ends. A call
-     * in any state but ReadyForConnect is ignored by the HMI's state machine.
+     * Sends a command through the integration's own sendMirrorCommand; for
+     * "prepare" the command line comes from its buildH264PrepareCommand, so
+     * mode, zoom and pan match what it sends at session start.
      */
-    private void reconnectTick(long now) {
+    private boolean mirror(String what) {
         try {
-            IDeviceManager dm = context.getDeviceManager();
-            TMDevice active = dm.getActiveDevice();
-            boolean activeValid = active != null && active.isValid();
-            if (now > reconnectUntil) {
-                log("auto-connect window over (dropped=" + sawDrop + ", tries=" + activations + ", active=" + active + ")");
-                reconnectUntil = 0L;
-            } else if (!sawDrop) {
-                if (!activeValid) {
-                    sawDrop = true;
-                    nextActivate = now + ACTIVATE_DELAY_MS;
-                    log("AA device dropped, activating it in " + (ACTIVATE_DELAY_MS / 1000) + " s unless the HMI does");
-                }
-            } else if (activeValid) {
-                log("AA device active again after " + activations + " auto-connect tries: " + active);
-                reconnectUntil = 0L;
-            } else if (now >= nextActivate && activations < ACTIVATE_MAX) {
-                nextActivate = now + ACTIVATE_RETRY_MS;
-                TMDevice d = reconnectDevice != null ? reconnectDevice : dm.getLastActiveDevice();
-                if (d == null || !d.isValid()) {
-                    log("auto-connect: no device to activate (last=" + d + ")");
-                } else if (!dm.isDeviceControlAvailable(d.getUniqueID())) {
-                    log("auto-connect: " + d + " not discovered yet");
-                } else {
-                    activations++;
-                    log("auto-connect: activating " + d + " (try " + activations + ")");
-                    dm.control(d).activateDevice();
-                }
+            String cmd = what;
+            if ("prepare".equals(what)) {
+                Method b = AndroidAutoClusterIntegration.class.getDeclaredMethod("buildH264PrepareCommand", new Class[0]);
+                b.setAccessible(true);
+                cmd = (String) b.invoke(integration, new Object[0]);
             }
+            Method m = AndroidAutoClusterIntegration.class.getDeclaredMethod("sendMirrorCommand", new Class[] { String.class });
+            m.setAccessible(true);
+            m.invoke(integration, new Object[] { cmd });
+            log("rebind: sent '" + cmd + "'");
+            return true;
         } catch (Throwable t) {
-            log("auto-connect error: " + t);
-            reconnectUntil = 0L;
+            log("rebind: could not send " + what + ": " + t);
+            return false;
+        }
+    }
+
+    private boolean deviceActive() {
+        try {
+            TMDevice d = context.getDeviceManager().getActiveDevice();
+            return d != null && d.isValid();
+        } catch (Throwable t) {
+            return true;
         }
     }
 
@@ -287,6 +292,14 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
         suspended = false;
         callMapCluster("switchKombiMapToHiddenContext");
         callMapCluster("switchKombiMapToAShownContext");
+        try {
+            if (mapClusterService != null) {
+                mapClusterService.getClass().getMethod("notifyViewSizeChanged", new Class[] { Boolean.TYPE })
+                        .invoke(mapClusterService, new Object[] { Boolean.TRUE });
+            }
+        } catch (Throwable t) {
+            log("notifyViewSizeChanged failed: " + t);
+        }
         splashPending = true;
     }
 

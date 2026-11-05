@@ -82,6 +82,24 @@ if [ -x "$CLUSTER_BIN" ]; then
     fi
 fi
 
+# Cold boot: AA connecting before Audi's navigation has set up the cockpit
+# leaves the cockpit video black until AA reconnects. KombiMapGuard writes
+# /tmp/aa_cockpit_ready once the navigation's cockpit map services are up;
+# hold the first gal start of a boot until then (at most GAL_WAIT_MAX s, so
+# a missing guard never blocks AA). Later starts find the flag and go on.
+GAL_READY=/tmp/aa_cockpit_ready
+GAL_WAIT_MAX=45
+w=0
+while [ ! -f "$GAL_READY" ] && [ $w -lt $GAL_WAIT_MAX ]; do
+    sleep 1
+    w=$((w + 1))
+done
+if [ -f "$GAL_READY" ]; then
+    echo "cockpit ready: waited ${w}s" >> $GAL_PRELOAD_LOG
+else
+    echo "cockpit ready: not seen after ${w}s, starting anyway" >> $GAL_PRELOAD_LOG
+fi
+
 echo "gal_start: $* LD_PRELOAD: $LD_PRELOAD LD_LIBRARY_PATH:$LD_LIBRARY_PATH" >> $GAL_PRELOAD_LOG
 
 if [ ! -x /mnt/app/eso/bin/apps/gal.real ]; then

@@ -15,8 +15,9 @@ FLAG=/tmp/kill_gal_now
 SKIP=/tmp/kill_gal_skip
 
 FALLBACK_WAIT=120
-# Retry only if gal.real does not come back after a slay. Up to 3 total.
-MAX_SLAYS=3
+# One slay only: a second one killed the session the user (or the guard's
+# auto-connect) had just started, 2026-11-04 logs.
+MAX_SLAYS=1
 RETRY_WAIT=30
 
 echo "kill_gal_watcher started $(date)" > "$LOG"

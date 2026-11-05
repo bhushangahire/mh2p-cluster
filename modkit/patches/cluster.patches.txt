@@ -11,3 +11,11 @@
 #   ldr.w r11, [r9, #4]   (shm->write_pos)   -> mov.w r11, #0
 #   ldr.w r4,  [r9, #8]   (shm->total_bytes) -> mov.w r4,  #0
 0x66ec  d9f804b0d9f80840  4ff0000b4ff00004  # h264 child reads the ring from its start
+
+# No stop splash (Q7 P2711, 2026-11-05). On 'stop' daemon_run() SIGTERMs the
+# h264 child and, when no mirror child runs, spawns capture=canim_splash. That
+# splash has no time limit and sits on displayable 33, so after unplugging the
+# phone the cockpit showed the splash/black instead of Audi's map. The patch
+# turns the "bgt" after "cmp.w r8, #0" into an unconditional branch, so 'stop'
+# never spawns the splash.
+0x4714  b8f1000f08dc  b8f1000f08e0  # stop: skip the canim_splash spawn
