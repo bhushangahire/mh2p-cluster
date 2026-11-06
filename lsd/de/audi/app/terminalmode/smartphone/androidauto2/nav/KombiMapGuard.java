@@ -42,7 +42,7 @@ import java.lang.reflect.Method;
  */
 public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
 
-    public static final String BUILD = "kombi-guard q7-holdgal 2026-11-04d";
+    public static final String BUILD = "kombi-guard q7-reshow 2026-11-05";
 
     private static final String MAP_CLUSTER_CLASS = "de.audi.tghu.navi.app.cluster.IMapClusterService";
     private static final String KILL_FLAG = "/tmp/kill_gal_now";
@@ -63,6 +63,9 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private static final long RELEASE_MS = 5000L;
     private static final long REAPPLY_MS = 10000L;
     private static final long SHOW_DELAY_MS = 1200L;
+    private static final long RESHOW_MS = 5000L;
+    // CockpitShot (Persist mod) takes a burst of cockpit screenshots when this appears.
+    private static final String SHOT_FLAG = "/tmp/cockpit_shot";
     // After a released pause: prepare, then resume this much later.
     private static final long RESUME_AFTER_MS = 2500L;
 
@@ -79,6 +82,9 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private boolean suspended = false;
     private long lastApply = 0L;
     private long showAt = 0L;
+    // Second hand-back after an unplug, in case the first ran while the
+    // AA cockpit window was still closing.
+    private long reshowAt = 0L;
     private boolean splashPending = false;
     private boolean renderedEarly = false;
     private boolean released = false;
@@ -152,12 +158,21 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             lastApply = now;
         } else if (!rendering && hidden) {
             log("AA video stopped, showing native cockpit map in " + SHOW_DELAY_MS + " ms");
+            touch(SHOT_FLAG);
             hidden = false;
             showAt = now + SHOW_DELAY_MS;
         }
         if (showAt != 0L && now >= showAt) {
             showAt = 0L;
             showNative();
+            reshowAt = now + RESHOW_MS;
+        }
+        if (reshowAt != 0L && now >= reshowAt) {
+            reshowAt = 0L;
+            if (!rendering && !hidden) {
+                log("showing native cockpit map again (state=" + stateField.getInt(integration) + ")");
+                showNative();
+            }
         }
         if (splashPending) {
             int state = stateField.getInt(integration);

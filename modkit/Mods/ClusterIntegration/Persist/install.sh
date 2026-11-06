@@ -55,17 +55,6 @@ if [[ -x "/eso/bin/apps/cluster/cluster" ]]; then
 fi
 
 
-# kill_gal_watcher: on a cold boot AA connects before Audi's navigation is
-# up and its video does not show until AA reconnects. KombiMapGuard
-# decides (/tmp/kill_gal_now or /tmp/kill_gal_skip); the watcher slays
-# gal.real once on kill_gal_now, with a timer fallback.
-WATCHER="${0%/*}/kill_gal_watcher.sh"
-if [ -r "$WATCHER" ]; then
-    ( /bin/ksh "$WATCHER" >/dev/null 2>&1 ) &
-    print "persist: kill_gal_watcher started pid $! from $WATCHER" >> "$DAEMON_LOG" 2>/dev/null
-fi
-
-
 # Copy the RAM-only logs next to cluster.log every 30 s, so a tester's card
 # also carries the reconnect and daemon-start story. Does nothing unless
 # external logging has written a cluster.log to a card or stick.
