@@ -19,7 +19,7 @@ import java.lang.reflect.Method;
  */
 public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
 
-    public static final String BUILD = "kombi-guard p2711-readiness-gate";
+    public static final String BUILD = "kombi-guard p2711-route62-fast-test";
 
     private static final String MAP_CLUSTER_CLASS = "de.audi.tghu.navi.app.cluster.IMapClusterService";
     private static final String CLUSTER_CTL = "/tmp/cluster_ctl";
@@ -29,6 +29,7 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private static final int CL_PAUSED = 3;
     private static final int KOMBI_INSTANCE = 3;
     private static final long POLL_MS = 1000L;
+    private static final long ROUTE_POLL_MS = 200L;
     private static final long LOOKUP_RETRY_MS = 5000L;
     private static final long REAPPLY_MS = 10000L;
     private static final long SHOW_DELAY_MS = 1200L;
@@ -60,6 +61,10 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
     private long rebindAt = 0L;
     private boolean stopSent = false;
     private boolean pausedReleased = false;
+    private boolean routeRendering = false;  // AA video state from the last full tick
+    private final Mh2pCockpitRoute route = new Mh2pCockpitRoute(new Mh2pCockpitRoute.KombiLog() {
+        public void log(String msg) { KombiMapGuard.this.log(msg); }
+    });
 
     private KombiMapGuard(IContext context, AndroidAutoClusterIntegration integration) {
         this.context = context;
@@ -90,14 +95,23 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
             return;
         }
         openTracker();
+        long nextTick = 0L;
         while (true) {
-            try {
-                tick();
-            } catch (Throwable t) {
-                log("tick error: " + t);
+            long now = System.currentTimeMillis();
+            if (now >= nextTick) {
+                nextTick = now + POLL_MS;
+                try {
+                    tick();
+                } catch (Throwable t) {
+                    log("tick error: " + t);
+                }
+            } else {
+                // Between full ticks only follow cockpit tab changes, so
+                // Audi's map flashes for ~0.2 s instead of up to 1 s.
+                route.tick(routeRendering, now);
             }
             try {
-                Thread.sleep(POLL_MS);
+                Thread.sleep(ROUTE_POLL_MS);
             } catch (InterruptedException e) {
                 return;
             }
@@ -126,32 +140,18 @@ public class KombiMapGuard implements Runnable, ServiceTrackerCustomizer {
         // Until ready, do not suspend/hide the map we are waiting to initialize.
         if (!Mh2pVideoGate.isReady()) return;
         boolean rendering = stateField.getInt(integration) == CL_RENDERING;
-        if (rendering && (!hidden || now - lastApply >= REAPPLY_MS)) {
-            if (!hidden) {
-                showAt = 0L;
-                log("AA video rendering, hiding native cockpit map"
-                        + " (viewer=" + (kombiViewer != null) + " mapCluster=" + (mapClusterService != null) + ")");
-            }
-            hideNative(!hidden || !suspended);
+        // Player is on displayable 62: Audi's map keeps source 33 and is never
+        // hidden or suspended; only the cockpit composition is switched.
+        routeRendering = rendering;
+        route.tick(rendering, now);
+        if (rendering && !hidden) {
+            log("AA video rendering, routing cockpit to displayable 62");
             hidden = true;
-            lastApply = now;
         } else if (!rendering && hidden) {
-            log("AA video stopped, showing native cockpit map in " + SHOW_DELAY_MS + " ms");
+            log("AA video stopped, cockpit back to the HMI composition");
             touch(SHOT_FLAG);
             hidden = false;
-            showAt = now + SHOW_DELAY_MS;
-        }
-        if (showAt != 0L && now >= showAt) {
-            showAt = 0L;
-            showNative();
-            reshowAt = now + RESHOW_MS;
-        }
-        if (reshowAt != 0L && now >= reshowAt) {
-            reshowAt = 0L;
-            if (!rendering && !hidden) {
-                log("showing native cockpit map again (state=" + stateField.getInt(integration) + ")");
-                showNative();
-            }
+            splashPending = true;
         }
         if (splashPending) {
             int state = stateField.getInt(integration);

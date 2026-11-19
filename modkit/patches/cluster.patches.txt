@@ -19,3 +19,12 @@
 # turns the "bgt" after "cmp.w r8, #0" into an unconditional branch, so 'stop'
 # never spawns the splash.
 0x4714  b8f1000f08dc  b8f1000f08e0  # stop: skip the canim_splash spawn
+
+# Player on displayable 62 (Q7 P2711, 2026-11-18). The h264 child registered
+# its window as displayable 33, Audi's own cockpit map source, so the display
+# manager dropped that source and never restored it: after unplugging, the
+# cockpit stayed black until an MMI restart. With the player on 62 Audi's map
+# keeps 33, and KombiMapGuard (Mh2pCockpitRoute) switches the cockpit
+# composition with dmdt: "sd 4 <HMI list, 33 -> 62>" while AA renders,
+# "sb 4" to hand it back. The "33" below is the displayable id string.
+0x14c10  3333  3632  # h264 window on displayable 62, not 33
